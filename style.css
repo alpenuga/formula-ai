@@ -91,3 +91,24 @@ textarea { min-height: 92px; resize: vertical; }
   .grid { display: grid; grid-template-columns: 1.1fr .9fr; gap: 12px; }
   h1 { font-size: 22px; }
 }
+.explain h2, .explain h3, .explain h4 {
+  margin: 16px 0 8px;
+  font-size: 16px;
+  line-height: 1.35;
+}
+.explain p { margin: 8px 0; }
+.explain ul { margin: 8px 0 8px 1.2em; padding: 0; }
+.explain li { margin: 6px 0; }
+.explain hr {
+  border: 0;
+  border-top: 1px solid var(--line);
+  margin: 14px 0;
+}
+.explain code {
+  background: #0f1630;
+  border: 1px solid var(--line);
+  border-radius: 6px;
+  padding: 1px 6px;
+  font-size: 0.92em;
+}
+.explain .katex-display { margin: 10px 0; overflow-x: auto; }
