@@ -1,7 +1,8 @@
 # Формула — шпаргалка для продолжения разработки
 
-PWA: точный калькулятор в браузере (JS + nerdamer) + Google Gemini (объяснения и фото заданий).
-Хостинг: GitHub Pages. Локальную модель не ставим — ПК слабый, ИИ облачный.
+- PWA: точный калькулятор в браузере (JS + nerdamer) + Google Gemini (объяснения и фото заданий).
+- Хостинг: GitHub Pages. 
+- Локальную модель не ставим — ПК слабый, ИИ облачный.
 
 ## Ссылки 
 
@@ -9,16 +10,17 @@ PWA: точный калькулятор в браузере (JS + nerdamer) + G
 - Сайт: `https://alpenuga.github.io/formula-ai/`
 - Cloudflare Worker (прокси, если CORS): `https://….workers.dev` (поле «Прокси URL» в ⚙)
 - Ключ Gemini: **только** в ⚙ приложения (`localStorage`), не в git
+- Cloudflare Worker Proxy: `https://formula-proxy.ВАШ_АККАУНТ.workers.dev`
 
 ## Файлы
-index.html
-style.css
-app.js
-manifest.json
-sw.js
-icon.svg
-README.md
-CONTINUE.md
+- index.html
+- style.css
+- app.js
+- manifest.json
+- sw.js
+- icon.svg
+- README.md
+- CONTINUE.md
 
 CDN: KaTeX 0.16.11, nerdamer 1.1.13 (core + Algebra + Calculus + Solve).
 
