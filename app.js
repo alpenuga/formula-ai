@@ -9,14 +9,20 @@ const ELEMENTS = {
   Pt:195.08, Au:196.97, Hg:200.59, Pb:207.2, U:238.03
 };
 
-const MODEL_ALIASES = {
-  "gemini-2.0-flash": "gemini-3.8-flash",
-  "gemini-2.0-flash-lite": "gemini-3.8-flash",
-  "gemini-1.5-flash": "gemini-3.8-flash",
-  "gemini-2.5-flash": "gemini-3.8-flash"
-};
-
 const DEFAULT_MODEL = "gemini-3.8-flash";
+const ALLOWED_MODELS = [
+  "gemini-3.8-flash",
+  "gemini-3-flash",
+  "gemini-flash-latest"
+];
+const MODEL_ALIASES = {
+  "gemini-2.0-flash": DEFAULT_MODEL,
+  "gemini-2.0-flash-lite": DEFAULT_MODEL,
+  "gemini-1.5-flash": DEFAULT_MODEL,
+  "gemini-1.5-pro": DEFAULT_MODEL,
+  "gemini-2.5-flash": DEFAULT_MODEL,
+  "gemini-2.5-pro": DEFAULT_MODEL
+};
 
 const state = {
   lastExact: "",
@@ -25,11 +31,23 @@ const state = {
   lastMime: "image/jpeg"
 };
 
+function resolveModel(name) {
+  const raw = String(name || "").trim();
+  const mapped = MODEL_ALIASES[raw] || raw || DEFAULT_MODEL;
+  if (ALLOWED_MODELS.includes(mapped)) return mapped;
+  return DEFAULT_MODEL;
+}
+
+function migrateModel() {
+  const next = resolveModel(localStorage.getItem("gemini_model"));
+  localStorage.setItem("gemini_model", next);
+  return next;
+}
+
 function loadSettings() {
   $("apiKey").value = localStorage.getItem("gemini_key") || "";
-  const raw = localStorage.getItem("gemini_model") || DEFAULT_MODEL;
-  const mapped = MODEL_ALIASES[raw] || raw;
-  $("model").value = mapped;
+  const model = migrateModel();
+  $("model").value = model;
   if (![...$("model").options].some((o) => o.value === $("model").value)) {
     $("model").value = DEFAULT_MODEL;
   }
@@ -38,9 +56,9 @@ function loadSettings() {
 
 function saveSettings() {
   localStorage.setItem("gemini_key", $("apiKey").value.trim());
-  localStorage.setItem("gemini_model", $("model").value);
+  localStorage.setItem("gemini_model", resolveModel($("model").value));
   localStorage.setItem("gemini_proxy", $("proxyUrl").value.trim());
-  $("settingsStatus").textContent = "Сохранено на этом устройстве.";
+  $("settingsStatus").textContent = "Сохранено. Модель: " + getModel();
   $("settingsStatus").className = "status ok";
 }
 
@@ -49,9 +67,7 @@ function getKey() {
 }
 
 function getModel() {
-  const raw = localStorage.getItem("gemini_model") || DEFAULT_MODEL;
-  const mapped = MODEL_ALIASES[raw] || raw;
-  return mapped || DEFAULT_MODEL;
+  return migrateModel();
 }
 
 function getProxy() {
@@ -73,7 +89,6 @@ function renderTex(el, latex) {
   }
 }
 
-/* ---------- точные вычисления ---------- */
 function heron(a, b, c) {
   const p = nerdamer(`(${a}+${b}+${c})/2`).text();
   return nerdamer(`sqrt((${p})*((${p})-${a})*((${p})-${b})*((${p})-${c}))`);
@@ -129,7 +144,6 @@ function calculate(raw) {
   return r;
 }
 
-/* ---------- химия ---------- */
 function molarMass(formula) {
   const tokens = tokenizeFormula(formula.replace(/\s/g, ""));
   return sumTokens(tokens);
@@ -168,7 +182,6 @@ function sumTokens(tokens) {
   return { mass: +s.toFixed(4), parts };
 }
 
-/* ---------- Gemini ---------- */
 async function fileToInline(file) {
   const resized = await resizeImage(file, 1600);
   state.lastImage = resized.b64;
@@ -205,6 +218,9 @@ async function gemini({ text, imageB64, mime }) {
   const key = getKey();
   if (!key) throw new Error("Сначала вставьте API-ключ в Настройки.");
   const model = getModel();
+  if (String(model).includes("2.0-flash") || String(model).includes("1.5-flash")) {
+    throw new Error("Старая модель в кэше. Обновите страницу Ctrl+F5 и снова Сохраните настройки.");
+  }
   const payload = {
     contents: [{
       role: "user",
@@ -226,7 +242,7 @@ async function gemini({ text, imageB64, mime }) {
     });
   } else {
     res = await fetch(
-      `https://generativelanguage.googleapis.com/v1beta/models/${model}:generateContent?key=${encodeURIComponent(key)}`,
+      `https://generativelanguage.googleapis.com/v1beta/models/${encodeURIComponent(model)}:generateContent?key=${encodeURIComponent(key)}`,
       {
         method: "POST",
         headers: { "Content-Type": "application/json" },
@@ -302,7 +318,6 @@ ${alsoExplain ? "После JSON с новой строки дай подроб�
   return { txt, json, calcLines };
 }
 
-/* ---------- история ---------- */
 function getHistory() {
   try { return JSON.parse(localStorage.getItem("formula_history") || "[]"); }
   catch { return []; }
@@ -332,7 +347,6 @@ function escapeHtml(s) {
   }[c]));
 }
 
-/* ---------- UI ---------- */
 document.querySelectorAll(".tab").forEach((btn) => {
   btn.onclick = () => {
     document.querySelectorAll(".tab").forEach((b) => b.classList.remove("active"));
@@ -369,8 +383,8 @@ $("explainBtn").onclick = async () => {
     if ($("expr").value.trim()) {
       try { calculate($("expr").value); } catch {}
     }
-    setStatus($("calcStatus"), "Gemini думает…");
-    $("explainOut").textContent = "Запрос к Gemini…";
+    setStatus($("calcStatus"), "Gemini думает… модель " + getModel());
+    $("explainOut").textContent = "Запрос к Gemini, модель: " + getModel();
     const t = await explainCurrent();
     $("explainOut").textContent = t;
     setStatus($("calcStatus"), "Объяснение готово", "ok");
@@ -397,7 +411,7 @@ $("file").onchange = async (ev) => {
 
 async function runPhoto(explain) {
   try {
-    setStatus($("photoStatus"), "Gemini читает фото…");
+    setStatus($("photoStatus"), "Gemini читает фото… модель " + getModel());
     const { txt, json, calcLines } = await readHomework(explain);
     $("ocrOut").textContent =
       (json ? `Предмет: ${json.subject}\n\n${json.task_text}\n\nЗаметки: ${json.notes || "—"}\n\n` : "") +
@@ -465,4 +479,6 @@ if ("serviceWorker" in navigator && location.protocol.startsWith("http")) {
 loadSettings();
 if (!getKey()) {
   setStatus($("calcStatus"), "Откройте ⚙ и вставьте ключ Gemini — без него работают только точные расчёты.", "");
+} else {
+  setStatus($("calcStatus"), "Модель: " + getModel(), "ok");
 }
