@@ -1,4 +1,4 @@
-const CACHE = "formula-ai-v4";
+const CACHE = "formula-ai-v5";
 const ASSETS = ["./","index.html","style.css","app.js","manifest.json","icon.svg"];
 
 self.addEventListener("install", (e) => {
