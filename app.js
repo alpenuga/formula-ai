@@ -372,22 +372,95 @@ function solveAbsIneq(s) {
   return { exact: text, text, note: "Неравенство с модулем (школьное |A| ≶ c)" };
 }
 
+function parseBound(t) {
+  t = String(t).trim().replace(/−/g, "-");
+  if (t === "-∞" || t === "-inf") return -Infinity;
+  if (t === "+∞" || t === "∞" || t === "+inf" || t === "inf") return Infinity;
+  const n = Number(String(t).replace(",", "."));
+  return Number.isFinite(n) ? n : NaN;
+}
+
+function parseOneSeg(s) {
+  s = String(s).trim();
+  const pt = s.match(/^\{(.+)\}$/);
+  if (pt) {
+    const x = parseBound(pt[1]);
+    if (Number.isNaN(x)) return null;
+    return { a: x, b: x, la: true, ra: true };
+  }
+  const m = s.match(/^([\(\[])\s*(.+?)\s*;\s*(.+?)\s*([\)\]])$/);
+  if (!m) return null;
+  const a = parseBound(m[2]), b = parseBound(m[3]);
+  if (Number.isNaN(a) || Number.isNaN(b)) return null;
+  return { a, b, la: m[1] === "[", ra: m[4] === "]" };
+}
+
+function parseIntervalStr(str) {
+  str = String(str).trim();
+  if (!str || str === "∅") return [];
+  if (/все x/i.test(str) || str === "ℝ" || /∈\s*ℝ/.test(str)) {
+    return [{ a: -Infinity, b: Infinity, la: false, ra: false }];
+  }
+  const segs = [];
+  for (const p of str.split("∪")) {
+    const g = parseOneSeg(p.trim());
+    if (g) segs.push(g);
+  }
+  return segs;
+}
+
+function inSeg(seg, x, closed) {
+  if (x > seg.a && x < seg.b) return true;
+  if (closed && x === seg.a) return seg.la;
+  if (closed && x === seg.b) return seg.ra;
+  return false;
+}
+
+function intersectTwoSegs(p, q) {
+  const a = Math.max(p.a, q.a);
+  const b = Math.min(p.b, q.b);
+  if (a > b) return null;
+  const la = (a > p.a || (a === p.a && p.la)) && (a > q.a || (a === q.a && q.la));
+  const ra = (b < p.b || (b === p.b && p.ra)) && (b < q.b || (b === q.b && q.ra));
+  if (a === b && !(la && ra)) return null;
+  return { a, b, la, ra };
+}
+
+function intersectSegLists(A, B) {
+  const out = [];
+  for (const p of A) {
+    for (const q of B) {
+      const s = intersectTwoSegs(p, q);
+      if (s) out.push(s);
+    }
+  }
+  return out;
+}
+
+function formatSegs(segs) {
+  if (!segs.length) return "∅";
+  if (segs.length === 1 && segs[0].a === -Infinity && segs[0].b === Infinity) {
+    return "все x ∈ ℝ";
+  }
+  return segs.map((s) => fmtInterval(s.a, s.b, s.la, s.ra)).join(" ∪ ");
+}
+
+function intersectIntervalStrings(s1, s2) {
+  return formatSegs(intersectSegLists(parseIntervalStr(s1), parseIntervalStr(s2)));
+}
+
 function solveInequality(s) {
   const dbl = parseDoubleIneq(s);
   if (dbl) {
-    const i1 = intervalMethod(`(${dbl.v})-(${dbl.a})`, dbl.op1 === "<" ? ">" : ">=");
-    const i2 = intervalMethod(`(${dbl.v})-(${dbl.b})`, dbl.op2 === "<" ? "<" : "<=");
-    const text = `( ${dbl.a} ${dbl.op1} ${dbl.v} ) ∩ ( ${dbl.v} ${dbl.op2} ${dbl.b} )  →  пересечение интервалов: [${i1}] и [${i2}]`;
-    const one = intervalMethod(
-      dbl.v,
-      "custom"
+    const left = intervalMethod(
+      `(${dbl.v})-(${dbl.a})`,
+      dbl.op1 === "<" ? ">" : ">="
     );
-    void one;
-    const left = intervalMethod(`(${dbl.v})-(${dbl.a})`, dbl.op1 === "<" ? ">" : ">=");
     const right = intervalMethod(`(${dbl.v})-(${dbl.b})`, dbl.op2);
+    const merged = intersectIntervalStrings(left, right);
     return {
-      exact: `${left} ∩ ${right}`,
-      text: `${left} ∩ ${right}`,
+      exact: merged,
+      text: `${left} ∩ ${right}  →  ${merged}`,
       note: "Двойное неравенство: пересечение двух условий"
     };
   }
