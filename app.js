@@ -9,6 +9,15 @@ const ELEMENTS = {
   Pt:195.08, Au:196.97, Hg:200.59, Pb:207.2, U:238.03
 };
 
+const MODEL_ALIASES = {
+  "gemini-2.0-flash": "gemini-3.8-flash",
+  "gemini-2.0-flash-lite": "gemini-3.8-flash",
+  "gemini-1.5-flash": "gemini-3.8-flash",
+  "gemini-2.5-flash": "gemini-3.8-flash"
+};
+
+const DEFAULT_MODEL = "gemini-3.8-flash";
+
 const state = {
   lastExact: "",
   lastInput: "",
@@ -18,9 +27,15 @@ const state = {
 
 function loadSettings() {
   $("apiKey").value = localStorage.getItem("gemini_key") || "";
-  $("model").value = localStorage.getItem("gemini_model") || "gemini-2.0-flash";
+  const raw = localStorage.getItem("gemini_model") || DEFAULT_MODEL;
+  const mapped = MODEL_ALIASES[raw] || raw;
+  $("model").value = mapped;
+  if (![...$("model").options].some((o) => o.value === $("model").value)) {
+    $("model").value = DEFAULT_MODEL;
+  }
   $("proxyUrl").value = localStorage.getItem("gemini_proxy") || "";
 }
+
 function saveSettings() {
   localStorage.setItem("gemini_key", $("apiKey").value.trim());
   localStorage.setItem("gemini_model", $("model").value);
@@ -28,11 +43,22 @@ function saveSettings() {
   $("settingsStatus").textContent = "Сохранено на этом устройстве.";
   $("settingsStatus").className = "status ok";
 }
-function getKey() { return (localStorage.getItem("gemini_key") || "").trim(); }
-function getModel() { return localStorage.getItem("gemini_model") || "gemini-2.0-flash"; }
-function getProxy() { return (localStorage.getItem("gemini_proxy") || "").trim(); }
 
-function setStatus(el, msg, type="") {
+function getKey() {
+  return (localStorage.getItem("gemini_key") || "").trim();
+}
+
+function getModel() {
+  const raw = localStorage.getItem("gemini_model") || DEFAULT_MODEL;
+  const mapped = MODEL_ALIASES[raw] || raw;
+  return mapped || DEFAULT_MODEL;
+}
+
+function getProxy() {
+  return (localStorage.getItem("gemini_proxy") || "").trim();
+}
+
+function setStatus(el, msg, type = "") {
   el.textContent = msg;
   el.className = "status " + type;
 }
@@ -48,7 +74,7 @@ function renderTex(el, latex) {
 }
 
 /* ---------- точные вычисления ---------- */
-function heron(a,b,c) {
+function heron(a, b, c) {
   const p = nerdamer(`(${a}+${b}+${c})/2`).text();
   return nerdamer(`sqrt((${p})*((${p})-${a})*((${p})-${b})*((${p})-${c}))`);
 }
@@ -68,17 +94,17 @@ function specialEval(raw) {
   const phys = s.split("|");
   if (phys.length === 2 && phys[0].includes("=")) {
     const expr = phys[0].trim();
-    const assigns = phys[1].split(";").map(x => x.trim()).filter(Boolean);
+    const assigns = phys[1].split(";").map((x) => x.trim()).filter(Boolean);
     let e = nerdamer(expr);
     for (const a of assigns) {
-      const [k,v] = a.split("=").map(x => x.trim());
+      const [k, v] = a.split("=").map((x) => x.trim());
       e = e.sub(k, v);
     }
     const right = e.text().split("=")[1] || e.text();
     const val = nerdamer(right);
     return { exact: val.toTeX(), text: val.toString(), note: "Подстановка значений в формулу" };
   }
-  if (/solve\s*\(/i.test(s) || /=/.test(s) && /x/.test(s)) {
+  if (/solve\s*\(/i.test(s) || (/=/.test(s) && /x/.test(s))) {
     let cmd = s;
     if (!/^solve/i.test(s)) cmd = `solve(${s}, x)`;
     const val = nerdamer(cmd);
@@ -105,10 +131,10 @@ function calculate(raw) {
 
 /* ---------- химия ---------- */
 function molarMass(formula) {
-  const tokens = tokenizeFormula(formula.replace(/\s/g,""));
-  const mass = sumTokens(tokens);
-  return mass;
+  const tokens = tokenizeFormula(formula.replace(/\s/g, ""));
+  return sumTokens(tokens);
 }
+
 function tokenizeFormula(s) {
   const stack = [[]];
   const re = /([A-Z][a-z]?)(\d*)|(\()|(\))(\d*)/g;
@@ -116,26 +142,28 @@ function tokenizeFormula(s) {
   while ((m = re.exec(s))) {
     if (m[1]) {
       if (!ELEMENTS[m[1]]) throw new Error("Неизвестный элемент: " + m[1]);
-      stack[stack.length-1].push({ el: m[1], n: m[2] ? +m[2] : 1 });
-    } else if (m[3]) stack.push([]);
-    else if (m[4]) {
+      stack[stack.length - 1].push({ el: m[1], n: m[2] ? +m[2] : 1 });
+    } else if (m[3]) {
+      stack.push([]);
+    } else if (m[4]) {
       const group = stack.pop();
       if (!stack.length) throw new Error("Лишняя скобка");
       const mul = m[5] ? +m[5] : 1;
       for (const t of group) t.n *= mul;
-      stack[stack.length-1].push(...group);
+      stack[stack.length - 1].push(...group);
     }
   }
   if (stack.length !== 1) throw new Error("Скобки не закрыты");
   return stack[0];
 }
+
 function sumTokens(tokens) {
   let s = 0;
   const parts = [];
   for (const t of tokens) {
     const add = ELEMENTS[t.el] * t.n;
     s += add;
-    parts.push(`${t.el}${t.n>1?t.n:""}: ${ELEMENTS[t.el]} × ${t.n} = ${+(add.toFixed(4))}`);
+    parts.push(`${t.el}${t.n > 1 ? t.n : ""}: ${ELEMENTS[t.el]} × ${t.n} = ${+(add.toFixed(4))}`);
   }
   return { mass: +s.toFixed(4), parts };
 }
@@ -154,12 +182,14 @@ function resizeImage(file, maxSide) {
     const url = URL.createObjectURL(file);
     img.onload = () => {
       let w = img.width, h = img.height;
-      if (Math.max(w,h) > maxSide) {
-        const k = maxSide / Math.max(w,h);
-        w = Math.round(w*k); h = Math.round(h*k);
+      if (Math.max(w, h) > maxSide) {
+        const k = maxSide / Math.max(w, h);
+        w = Math.round(w * k);
+        h = Math.round(h * k);
       }
       const canvas = document.createElement("canvas");
-      canvas.width = w; canvas.height = h;
+      canvas.width = w;
+      canvas.height = h;
       canvas.getContext("2d").drawImage(img, 0, 0, w, h);
       const mime = "image/jpeg";
       const dataUrl = canvas.toDataURL(mime, 0.85);
@@ -197,15 +227,19 @@ async function gemini({ text, imageB64, mime }) {
   } else {
     res = await fetch(
       `https://generativelanguage.googleapis.com/v1beta/models/${model}:generateContent?key=${encodeURIComponent(key)}`,
-      { method: "POST", headers: { "Content-Type": "application/json" }, body: JSON.stringify(payload) }
+      {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify(payload)
+      }
     );
   }
   if (!res.ok) {
     const t = await res.text();
-    throw new Error(`Gemini ${res.status}: ${t.slice(0,400)}`);
+    throw new Error(`Gemini ${res.status}: ${t.slice(0, 400)}`);
   }
   const data = await res.json();
-  const txt = data?.candidates?.[0]?.content?.parts?.map(p => p.text).join("\n") || "";
+  const txt = data?.candidates?.[0]?.content?.parts?.map((p) => p.text).join("\n") || "";
   if (!txt) throw new Error("Пустой ответ модели. Проверьте ключ/модель/лимиты.");
   return txt;
 }
@@ -251,7 +285,7 @@ async function readHomework(alsoExplain) {
 ${alsoExplain ? "После JSON с новой строки дай подробное объяснение решения по-русски." : "Только JSON."}`
   });
   const json = parseJsonLoose(txt);
-  let calcLines = [];
+  const calcLines = [];
   if (json?.nerdamer_expressions?.length) {
     for (const e of json.nerdamer_expressions) {
       try {
@@ -273,11 +307,13 @@ function getHistory() {
   try { return JSON.parse(localStorage.getItem("formula_history") || "[]"); }
   catch { return []; }
 }
+
 function pushHistory(item) {
   const h = getHistory();
   h.unshift({ ...item, t: Date.now() });
   localStorage.setItem("formula_history", JSON.stringify(h.slice(0, 40)));
 }
+
 function renderHistory() {
   const h = getHistory();
   const box = $("historyBox");
@@ -286,24 +322,28 @@ function renderHistory() {
     return;
   }
   box.innerHTML = h.map((x) =>
-    `<div class="history-item"><b>${x.type}</b><div>${escapeHtml(x.input||"")}</div><div class="muted">${escapeHtml(x.output||"")}</div></div>`
+    `<div class="history-item"><b>${x.type}</b><div>${escapeHtml(x.input || "")}</div><div class="muted">${escapeHtml(x.output || "")}</div></div>`
   ).join("");
 }
+
 function escapeHtml(s) {
-  return String(s).replace(/[&<>"']/g, c => ({'&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;',"'":"&#39;"}[c]));
+  return String(s).replace(/[&<>"']/g, (c) => ({
+    "&": "&amp;", "<": "&lt;", ">": "&gt;", '"': "&quot;", "'": "&#39;"
+  }[c]));
 }
 
 /* ---------- UI ---------- */
 document.querySelectorAll(".tab").forEach((btn) => {
   btn.onclick = () => {
-    document.querySelectorAll(".tab").forEach(b => b.classList.remove("active"));
+    document.querySelectorAll(".tab").forEach((b) => b.classList.remove("active"));
     btn.classList.add("active");
-    ["calc","photo","chem","history"].forEach(t => {
-      $("tab-"+t).classList.toggle("hidden", t !== btn.dataset.tab);
+    ["calc", "photo", "chem", "history"].forEach((t) => {
+      $("tab-" + t).classList.toggle("hidden", t !== btn.dataset.tab);
     });
     if (btn.dataset.tab === "history") renderHistory();
   };
 });
+
 document.querySelectorAll(".chip").forEach((c) => {
   c.onclick = () => { $("expr").value = c.dataset.ex; };
 });
@@ -316,12 +356,14 @@ $("calcBtn").onclick = () => {
     setStatus($("calcStatus"), e.message, "err");
   }
 };
+
 $("clearBtn").onclick = () => {
   $("expr").value = "";
   $("exactOut").textContent = "—";
   $("texOut").innerHTML = "";
   $("explainOut").textContent = "";
 };
+
 $("explainBtn").onclick = async () => {
   try {
     if ($("expr").value.trim()) {
@@ -332,7 +374,7 @@ $("explainBtn").onclick = async () => {
     const t = await explainCurrent();
     $("explainOut").textContent = t;
     setStatus($("calcStatus"), "Объяснение готово", "ok");
-    pushHistory({ type: "explain", input: $("expr").value, output: t.slice(0,200) });
+    pushHistory({ type: "explain", input: $("expr").value, output: t.slice(0, 200) });
   } catch (e) {
     setStatus($("calcStatus"), e.message, "err");
     $("explainOut").textContent = e.message;
@@ -358,15 +400,20 @@ async function runPhoto(explain) {
     setStatus($("photoStatus"), "Gemini читает фото…");
     const { txt, json, calcLines } = await readHomework(explain);
     $("ocrOut").textContent =
-      (json ? `Предмет: ${json.subject}\n\n${json.task_text}\n\nЗаметки: ${json.notes||"—"}\n\n` : "") +
+      (json ? `Предмет: ${json.subject}\n\n${json.task_text}\n\nЗаметки: ${json.notes || "—"}\n\n` : "") +
       (calcLines.length ? ("Локальный точный расчёт:\n" + calcLines.join("\n") + "\n\n") : "") +
       txt;
     setStatus($("photoStatus"), "Готово", "ok");
-    pushHistory({ type: "photo", input: json?.task_text || "фото", output: (calcLines[0]||"").slice(0,200) });
+    pushHistory({
+      type: "photo",
+      input: json?.task_text || "фото",
+      output: (calcLines[0] || "").slice(0, 200)
+    });
   } catch (e) {
     setStatus($("photoStatus"), e.message, "err");
   }
 }
+
 $("readBtn").onclick = () => runPhoto(false);
 $("photoExplainBtn").onclick = () => runPhoto(true);
 
@@ -385,6 +432,7 @@ $("molarBtn").onclick = () => {
     $("molarNote").textContent = e.message;
   }
 };
+
 $("chemExplainBtn").onclick = async () => {
   try {
     const f = $("formulaChem").value.trim();
@@ -400,16 +448,20 @@ $("chemExplainBtn").onclick = async () => {
   }
 };
 
-$("settingsBtn").onclick = () => { loadSettings(); $("settingsModal").classList.add("open"); };
+$("settingsBtn").onclick = () => {
+  loadSettings();
+  $("settingsModal").classList.add("open");
+};
 $("closeSettings").onclick = () => $("settingsModal").classList.remove("open");
 $("saveSettings").onclick = saveSettings;
 $("settingsModal").addEventListener("click", (e) => {
   if (e.target.id === "settingsModal") e.target.classList.remove("open");
 });
 
-if ("serviceWorker" in navigator) {
-  navigator.serviceWorker.register("./sw.js");
+if ("serviceWorker" in navigator && location.protocol.startsWith("http")) {
+  navigator.serviceWorker.register("./sw.js").catch(() => {});
 }
+
 loadSettings();
 if (!getKey()) {
   setStatus($("calcStatus"), "Откройте ⚙ и вставьте ключ Gemini — без него работают только точные расчёты.", "");
