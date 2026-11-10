@@ -212,9 +212,26 @@ function evalAt(expr, x) {
   }
 }
 
+function splitFrac(expr) {
+  let d = 0;
+  const s = String(expr);
+  for (let i = 0; i < s.length; i++) {
+    if (s[i] === "(") d++;
+    else if (s[i] === ")") d--;
+    else if (s[i] === "/" && d === 0) {
+      return { num: s.slice(0, i), den: s.slice(i + 1) };
+    }
+  }
+  return { num: s, den: "1" };
+}
+
+function hasX(expr) {
+  return /(^|[^a-zA-Z])x([^a-zA-Z]|$)/i.test(String(expr));
+}
+
 function intervalMethod(fExpr, op) {
   const f = `(${fExpr})`;
-  if (!/[xX]/.test(fExpr)) {
+  if (!hasX(fExpr)) {
     const sg = evalAt(f, 0);
     const ok =
       (op === ">" && sg === "+") ||
@@ -225,18 +242,21 @@ function intervalMethod(fExpr, op) {
     return ok ? "все x ∈ ℝ" : "∅";
   }
 
-  let num = fExpr, den = "1";
-  try { num = nerdamer(`numerator(${fExpr})`).text(); } catch {}
-  try { den = nerdamer(`denominator(${fExpr})`).text(); } catch {}
+  const parts = splitFrac(fExpr);
+  let num = parts.num, den = parts.den;
+  try { num = nerdamer(num).text(); } catch {}
+  try { den = nerdamer(den).text(); } catch {}
 
   let zeros = [];
   let poles = [];
   try { zeros = extractRoots(nerdamer(`solve((${num})=0,x)`)); } catch {}
-  try {
-    if (den && den !== "1") poles = extractRoots(nerdamer(`solve((${den})=0,x)`));
-  } catch {}
+  if (hasX(den)) {
+    try { poles = extractRoots(nerdamer(`solve((${den})=0,x)`)); } catch {}
+  }
+  poles = poles.filter((p) => evalAt(`(${den})`, p) === "0");
+
   const poleSet = new Set(poles.map((p) => fmtSchoolNum(p)));
-  const isPole = (x) => poleSet.has(fmtSchoolNum(x)) || evalAt(`(${den})`, x) === "0";
+  const isPole = (x) => poleSet.has(fmtSchoolNum(x));
 
   if (op === "=") {
     const zs = zeros.filter((z) => !isPole(z));
@@ -252,8 +272,8 @@ function intervalMethod(fExpr, op) {
   for (let i = 0; i < bounds.length - 1; i++) {
     const a = bounds[i], b = bounds[i + 1];
     const mid = a === -Infinity && b === Infinity ? 0
-      : a === -Infinity ? b - 1
-      : b === Infinity ? a + 1
+      : a === -Infinity ? b - (Math.abs(b) || 1)
+      : b === Infinity ? a + (Math.abs(a) || 1)
       : (a + b) / 2;
     const sg = evalAt(f, mid);
     const ok = wantPlus ? sg === "+" : sg === "-";
