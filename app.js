@@ -9,19 +9,26 @@ const ELEMENTS = {
   Pt:195.08, Au:196.97, Hg:200.59, Pb:207.2, U:238.03
 };
 
-const DEFAULT_MODEL = "gemini-3.8-flash";
+const DEFAULT_MODEL = "gemini-flash-latest";
 const ALLOWED_MODELS = [
+  "gemini-flash-latest",
   "gemini-3.8-flash",
-  "gemini-3-flash",
-  "gemini-flash-latest"
+  "gemini-3.5-flash",
+  "gemini-2.5-flash",
+  "gemini-flash-lite-latest",
+  "gemini-3.1-flash-lite"
 ];
+const FALLBACK_MODELS = ALLOWED_MODELS.slice();
 const MODEL_ALIASES = {
   "gemini-2.0-flash": DEFAULT_MODEL,
-  "gemini-2.0-flash-lite": DEFAULT_MODEL,
+  "gemini-2.0-flash-lite": "gemini-flash-lite-latest",
   "gemini-1.5-flash": DEFAULT_MODEL,
-  "gemini-1.5-pro": DEFAULT_MODEL,
-  "gemini-2.5-flash": DEFAULT_MODEL,
-  "gemini-2.5-pro": DEFAULT_MODEL
+  "gemini-1.5-pro": "gemini-2.5-flash",
+  "gemini-3-flash": DEFAULT_MODEL,
+  "gemini-3-flash-preview": DEFAULT_MODEL,
+  "gemini-2.5-pro": "gemini-2.5-flash",
+  "gemini-3.6-flash": "gemini-3.8-flash",
+  "gemini-3.7-flash": "gemini-3.8-flash"
 };
 
 const state = {
@@ -32,10 +39,9 @@ const state = {
 };
 
 function resolveModel(name) {
-  const raw = String(name || "").trim();
+  const raw = String(name || "").replace(/^models\//, "").trim();
   const mapped = MODEL_ALIASES[raw] || raw || DEFAULT_MODEL;
-  if (ALLOWED_MODELS.includes(mapped)) return mapped;
-  return DEFAULT_MODEL;
+  return ALLOWED_MODELS.includes(mapped) ? mapped : DEFAULT_MODEL;
 }
 
 function migrateModel() {
@@ -74,9 +80,17 @@ function getProxy() {
   return (localStorage.getItem("gemini_proxy") || "").trim();
 }
 
+function activeStatusEl() {
+  if ($("tab-photo") && !$("tab-photo").classList.contains("hidden")) return $("photoStatus");
+  if ($("tab-chem") && !$("tab-chem").classList.contains("hidden")) return $("molarNote");
+  return $("calcStatus");
+}
+
 function setStatus(el, msg, type = "") {
-  el.textContent = msg;
-  el.className = "status " + type;
+  const target = el || activeStatusEl();
+  if (!target) return;
+  target.textContent = msg;
+  target.className = "status " + type;
 }
 
 function renderTex(el, latex) {
@@ -214,25 +228,16 @@ function resizeImage(file, maxSide) {
   });
 }
 
-async function gemini({ text, imageB64, mime }) {
-  const key = getKey();
-  if (!key) throw new Error("Сначала вставьте API-ключ в Настройки.");
-  const model = getModel();
-  if (String(model).includes("2.0-flash") || String(model).includes("1.5-flash")) {
-    throw new Error("Старая модель в кэше. Обновите страницу Ctrl+F5 и снова Сохраните настройки.");
-  }
-  const payload = {
-    contents: [{
-      role: "user",
-      parts: [
-        ...(imageB64 ? [{ inline_data: { mime_type: mime || "image/jpeg", data: imageB64 } }] : []),
-        { text }
-      ]
-    }],
-    generationConfig: { temperature: 0.2 }
-  };
+function sleep(ms) {
+  return new Promise((r) => setTimeout(r, ms));
+}
 
-  const proxy = getProxy();
+function modelQueue() {
+  const first = getModel();
+  return [first, ...FALLBACK_MODELS.filter((m) => m !== first)];
+}
+
+async function geminiOnce(model, key, payload, proxy) {
   let res;
   if (proxy) {
     res = await fetch(proxy.replace(/\/$/, "") + "/gemini", {
@@ -250,20 +255,152 @@ async function gemini({ text, imageB64, mime }) {
       }
     );
   }
-  if (!res.ok) {
-    const t = await res.text();
-    throw new Error(`Gemini ${res.status}: ${t.slice(0, 400)}`);
+  const raw = await res.text();
+  return { ok: res.ok, status: res.status, raw };
+}
+
+async function gemini({ text, imageB64, mime }) {
+  const key = getKey();
+  if (!key) throw new Error("Сначала вставьте API-ключ в Настройки.");
+
+  const payload = {
+    contents: [{
+      role: "user",
+      parts: [
+        ...(imageB64 ? [{ inline_data: { mime_type: mime || "image/jpeg", data: imageB64 } }] : []),
+        { text }
+      ]
+    }],
+    generationConfig: { temperature: 0.2 }
+  };
+
+  const proxy = getProxy();
+  const models = modelQueue();
+  let lastErr = "";
+
+  for (const model of models) {
+    for (let attempt = 1; attempt <= 3; attempt++) {
+      setStatus(activeStatusEl(), `Gemini: ${model} (попытка ${attempt})…`);
+      const { ok, status, raw } = await geminiOnce(model, key, payload, proxy);
+
+      if (ok) {
+        const data = JSON.parse(raw);
+        const txt = data?.candidates?.[0]?.content?.parts?.map((p) => p.text).join("\n") || "";
+        if (!txt) throw new Error("Пустой ответ модели. Проверьте ключ/лимиты.");
+        localStorage.setItem("gemini_model", model);
+        return txt;
+      }
+
+      lastErr = `Gemini ${status}: ${raw.slice(0, 400)}`;
+      if (status === 503 || status === 429) {
+        await sleep(1200 * attempt);
+        continue;
+      }
+      if (status === 404) break;
+      if (status === 400 || status === 401 || status === 403) throw new Error(lastErr);
+      break;
+    }
   }
-  const data = await res.json();
-  const txt = data?.candidates?.[0]?.content?.parts?.map((p) => p.text).join("\n") || "";
-  if (!txt) throw new Error("Пустой ответ модели. Проверьте ключ/модель/лимиты.");
-  return txt;
+
+  throw new Error(
+    lastErr +
+    "\n\nПодождите минуту или в ⚙ выберите gemini-flash-latest / gemini-2.5-flash."
+  );
 }
 
 function parseJsonLoose(s) {
   const m = s.match(/\{[\s\S]*\}/);
   if (!m) return null;
   try { return JSON.parse(m[0]); } catch { return null; }
+}
+
+function escapeHtml(s) {
+  return String(s).replace(/[&<>"']/g, (c) => ({
+    "&": "&amp;", "<": "&lt;", ">": "&gt;", '"': "&quot;", "'": "&#39;"
+  }[c]));
+}
+
+function renderExplain(el, text) {
+  if (!el) return;
+  const math = [];
+  let src = String(text ?? "").replace(/\r\n/g, "\n");
+
+  src = src.replace(/```[\s\S]*?```/g, (block) => {
+    const inner = block.replace(/^```[a-zA-Z]*\n?/, "").replace(/```$/, "");
+    const i = math.length;
+    math.push({ display: true, tex: inner.trim(), code: true });
+    return `@@MATH${i}@@`;
+  });
+  src = src.replace(/\\\[([\s\S]+?)\\\]/g, (_, tex) => {
+    const i = math.length;
+    math.push({ display: true, tex: tex.trim() });
+    return `@@MATH${i}@@`;
+  });
+  src = src.replace(/\$\$([\s\S]+?)\$\$/g, (_, tex) => {
+    const i = math.length;
+    math.push({ display: true, tex: tex.trim() });
+    return `@@MATH${i}@@`;
+  });
+  src = src.replace(/\\\(([\s\S]+?)\\\)/g, (_, tex) => {
+    const i = math.length;
+    math.push({ display: false, tex: tex.trim() });
+    return `@@MATH${i}@@`;
+  });
+  src = src.replace(/\$([^$\n]+?)\$/g, (_, tex) => {
+    const i = math.length;
+    math.push({ display: false, tex: tex.trim() });
+    return `@@MATH${i}@@`;
+  });
+
+  const inline = (t) => escapeHtml(t)
+    .replace(/\*\*(.+?)\*\*/g, "<strong>$1</strong>")
+    .replace(/`([^`]+)`/g, "<code>$1</code>")
+    .replace(/@@MATH(\d+)@@/g, (_, i) => `<span class="math" data-i="${i}"></span>`);
+
+  const html = [];
+  let list = null;
+  const flushList = () => {
+    if (list) {
+      html.push("<ul>" + list.join("") + "</ul>");
+      list = null;
+    }
+  };
+
+  for (const line of src.split("\n")) {
+    const t = line.trim();
+    if (!t) { flushList(); continue; }
+    if (/^---+$/.test(t)) { flushList(); html.push("<hr>"); continue; }
+    const h = t.match(/^(#{1,4})\s+(.+)$/);
+    if (h) {
+      flushList();
+      const n = Math.min(h[1].length + 1, 4);
+      html.push(`<h${n}>${inline(h[2])}</h${n}>`);
+      continue;
+    }
+    const li = t.match(/^[-*]\s+(.+)$/);
+    if (li) {
+      if (!list) list = [];
+      list.push(`<li>${inline(li[1])}</li>`);
+      continue;
+    }
+    flushList();
+    html.push(`<p>${inline(line)}</p>`);
+  }
+  flushList();
+  el.innerHTML = html.join("") || "";
+  el.querySelectorAll("span.math").forEach((span) => {
+    const item = math[+span.dataset.i];
+    if (!item) return;
+    if (item.code) {
+      span.innerHTML = "<pre><code>" + escapeHtml(item.tex) + "</code></pre>";
+      return;
+    }
+    try {
+      katex.render(item.tex, span, { throwOnError: false, displayMode: item.display });
+    } catch {
+      span.textContent = item.tex;
+    }
+  });
 }
 
 async function explainCurrent() {
@@ -274,13 +411,14 @@ async function explainCurrent() {
     text: `Ты репетитор по математике, физике и химии. Объясни по-русски понятно, по шагам.
 Формула/задача: ${input}
 Точный результат локального калькулятора (ему можно доверять в алгебре): ${exact || "ещё не считали"}
+Пиши Markdown: заголовки ###, списки, формулы только в $...$ или $$...$$.
 Структура:
-1) Что это за задача
-2) Какие формулы/теоремы нужны
-3) Пошаговое решение
-4) Как интерпретировать точный ответ (дроби, корни, π)
-5) Частые ошибки
-Не выдумывай числа, которые не даны. Формулы можно писать в LaTeX $...$.`
+### 1) Что это за задача
+### 2) Какие формулы/теоремы нужны
+### 3) Пошаговое решение
+### 4) Как интерпретировать точный ответ
+### 5) Частые ошибки
+Не выдумывай числа, которые не даны.`
   });
 }
 
@@ -298,7 +436,7 @@ async function readHomework(alsoExplain) {
   "unknowns": ["x"],
   "notes": "что видно на чертеже"
 }
-${alsoExplain ? "После JSON с новой строки дай подробное объяснение решения по-русски." : "Только JSON."}`
+${alsoExplain ? "После JSON с новой строки дай подробное объяснение решения по-русски в Markdown, формулы в $...$." : "Только JSON."}`
   });
   const json = parseJsonLoose(txt);
   const calcLines = [];
@@ -312,7 +450,7 @@ ${alsoExplain ? "После JSON с новой строки дай подроб�
       }
     }
   }
-  if (json?.formulas_latex?.length && !$("expr").value.trim()) {
+  if ((json?.formulas_latex?.length || json?.nerdamer_expressions?.length) && !$("expr").value.trim()) {
     $("expr").value = json.nerdamer_expressions?.[0] || json.task_text || "";
   }
   return { txt, json, calcLines };
@@ -339,12 +477,6 @@ function renderHistory() {
   box.innerHTML = h.map((x) =>
     `<div class="history-item"><b>${x.type}</b><div>${escapeHtml(x.input || "")}</div><div class="muted">${escapeHtml(x.output || "")}</div></div>`
   ).join("");
-}
-
-function escapeHtml(s) {
-  return String(s).replace(/[&<>"']/g, (c) => ({
-    "&": "&amp;", "<": "&lt;", ">": "&gt;", '"': "&quot;", "'": "&#39;"
-  }[c]));
 }
 
 document.querySelectorAll(".tab").forEach((btn) => {
@@ -386,8 +518,8 @@ $("explainBtn").onclick = async () => {
     setStatus($("calcStatus"), "Gemini думает… модель " + getModel());
     $("explainOut").textContent = "Запрос к Gemini, модель: " + getModel();
     const t = await explainCurrent();
-    $("explainOut").textContent = t;
-    setStatus($("calcStatus"), "Объяснение готово", "ok");
+    renderExplain($("explainOut"), t);
+    setStatus($("calcStatus"), "Объяснение готово · " + getModel(), "ok");
     pushHistory({ type: "explain", input: $("expr").value, output: t.slice(0, 200) });
   } catch (e) {
     setStatus($("calcStatus"), e.message, "err");
@@ -413,11 +545,13 @@ async function runPhoto(explain) {
   try {
     setStatus($("photoStatus"), "Gemini читает фото… модель " + getModel());
     const { txt, json, calcLines } = await readHomework(explain);
-    $("ocrOut").textContent =
-      (json ? `Предмет: ${json.subject}\n\n${json.task_text}\n\nЗаметки: ${json.notes || "—"}\n\n` : "") +
-      (calcLines.length ? ("Локальный точный расчёт:\n" + calcLines.join("\n") + "\n\n") : "") +
-      txt;
-    setStatus($("photoStatus"), "Готово", "ok");
+    renderExplain(
+      $("ocrOut"),
+      (json ? `### Предмет\n${json.subject}\n\n${json.task_text || ""}\n\n${json.notes || "—"}\n\n` : "") +
+      (calcLines.length ? ("### Локальный точный расчёт\n" + calcLines.map((x) => `* ${x}`).join("\n") + "\n\n") : "") +
+      txt
+    );
+    setStatus($("photoStatus"), "Готово · " + getModel(), "ok");
     pushHistory({
       type: "photo",
       input: json?.task_text || "фото",
@@ -453,9 +587,9 @@ $("chemExplainBtn").onclick = async () => {
     const r = molarMass(f);
     $("molarOut").textContent = r.mass + " г/моль";
     const t = await gemini({
-      text: `Объясни по-русски расчёт молярной массы ${f}. Локальный точный результат: ${r.mass} г/моль. Разбор: ${r.parts.join("; ")}. Кратко напомни, что такое моль и как это применяют в задачах.`
+      text: `Объясни по-русски расчёт молярной массы ${f}. Локальный точный результат: ${r.mass} г/моль. Разбор: ${r.parts.join("; ")}. Markdown, формулы в $...$. Кратко напомни, что такое моль.`
     });
-    $("explainOut").textContent = t;
+    renderExplain($("explainOut"), t);
     document.querySelector('[data-tab="calc"]').click();
   } catch (e) {
     $("molarNote").textContent = e.message;
