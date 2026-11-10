@@ -406,7 +406,7 @@ function namedSchool(s) {
     ),
     gcd: () => wrapResult(nerdamer(`gcd(${a[0]},${a[1]})`), "НОД"),
     lcm: () => wrapResult(nerdamer(`lcm(${a[0]},${a[1]})`), "НОК"),
-    fact: () => wrapResult(nerdamer(`factorials(${a[0]})`).text ? nerdamer(`fact(${a[0]})`) : nerdamer(`fact(${a[0]})`), "n!"),
+        fact: () => wrapResult(nerdamer(`fact(${a[0]})`), "n!"),
     c: () => wrapResult(nerdamer(`fact(${a[0]})/(fact(${a[1]})*fact((${a[0]})-(${a[1]})))`), "Число сочетаний C(n,k)"),
     p: () => wrapResult(nerdamer(`fact(${a[0]})/fact((${a[0]})-(${a[1]}))`), "Число размещений P(n,k)"),
     sind: () => wrapResult(nerdamer(`sin((${a[0]})*pi/180)`).evaluate(), "sin градусов (через π/180)"),
@@ -427,9 +427,6 @@ function namedSchool(s) {
     dens: () => wrapResult(nerdamer(`(${a[0]})/(${a[1]})`), "Плотность m/V")
   };
 
-  if (n === "fact") {
-    try { return wrapResult(nerdamer(`fact(${a[0]})`), "n!"); } catch { return null; }
-  }
   if (map[n]) {
     try { return map[n](); } catch (e) { throw new Error("Команда " + n + ": " + e.message); }
   }
