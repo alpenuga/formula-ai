@@ -375,6 +375,32 @@ function solveInequality(s) {
   };
 }
 
+function toNat(expr) {
+  const n = Number(nerdamer(String(expr)).evaluate().text());
+  if (!Number.isInteger(n) || n < 0) throw new Error("Нужно целое число ≥ 0");
+  if (n > 170) throw new Error("Слишком большое n");
+  return n;
+}
+
+function jsFact(expr) {
+  const n = toNat(expr);
+  let r = 1n;
+  for (let i = 2n; i <= BigInt(n); i++) r *= i;
+  return r.toString();
+}
+
+function jsComb(nExpr, kExpr) {
+  const n = toNat(nExpr), k = toNat(kExpr);
+  if (k > n) return "0";
+  return (BigInt(jsFact(n)) / (BigInt(jsFact(k)) * BigInt(jsFact(n - k)))).toString();
+}
+
+function jsPerm(nExpr, kExpr) {
+  const n = toNat(nExpr), k = toNat(kExpr);
+  if (k > n) return "0";
+  return (BigInt(jsFact(n)) / BigInt(jsFact(n - k))).toString();
+}
+
 function namedSchool(s) {
   const call = parseCall(s);
   if (!call) return null;
@@ -406,9 +432,9 @@ function namedSchool(s) {
     ),
     gcd: () => wrapResult(nerdamer(`gcd(${a[0]},${a[1]})`), "НОД"),
     lcm: () => wrapResult(nerdamer(`lcm(${a[0]},${a[1]})`), "НОК"),
-        fact: () => wrapResult(nerdamer(`fact(${a[0]})`), "n!"),
-    c: () => wrapResult(nerdamer(`fact(${a[0]})/(fact(${a[1]})*fact((${a[0]})-(${a[1]})))`), "Число сочетаний C(n,k)"),
-    p: () => wrapResult(nerdamer(`fact(${a[0]})/fact((${a[0]})-(${a[1]}))`), "Число размещений P(n,k)"),
+    fact: () => wrapResult(jsFact(a[0]), "n!"),
+    c: () => wrapResult(jsComb(a[0], a[1]), "Число сочетаний C(n,k)"),
+    p: () => wrapResult(jsPerm(a[0], a[1]), "Число размещений P(n,k)"),
     sind: () => wrapResult(nerdamer(`sin((${a[0]})*pi/180)`).evaluate(), "sin градусов (через π/180)"),
     cosd: () => wrapResult(nerdamer(`cos((${a[0]})*pi/180)`).evaluate(), "cos градусов"),
     tand: () => wrapResult(nerdamer(`tan((${a[0]})*pi/180)`).evaluate(), "tg градусов"),
