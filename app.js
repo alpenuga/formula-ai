@@ -212,9 +212,27 @@ function evalAt(expr, x) {
   }
 }
 
+function unwrapParens(s) {
+  s = String(s).replace(/\s+/g, "");
+  while (s.length >= 2 && s[0] === "(" && s[s.length - 1] === ")") {
+    let d = 0, inner = true;
+    for (let i = 0; i < s.length; i++) {
+      if (s[i] === "(") d++;
+      else if (s[i] === ")") d--;
+      if (d === 0 && i < s.length - 1) { inner = false; break; }
+    }
+    if (!inner || d !== 0) break;
+    s = s.slice(1, -1);
+  }
+  return s;
+}
+
 function splitFrac(expr) {
+  let s = unwrapParens(expr);
+  s = s.replace(/-\(?0\)?$/g, "");
+  s = unwrapParens(s);
+
   let d = 0;
-  const s = String(expr);
   for (let i = 0; i < s.length; i++) {
     if (s[i] === "(") d++;
     else if (s[i] === ")") d--;
