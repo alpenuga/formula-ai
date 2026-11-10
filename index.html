@@ -35,14 +35,31 @@
         <div class="card">
           <label for="expr">Формула или уравнение</label>
           <textarea id="expr" placeholder="Например: solve(x^2 - 5x + 6 = 0, x)  или  sqrt(8)+1/3"></textarea>
-          <div class="examples">
-            <span class="chip" data-ex="sqrt(8)+1/3">√8 + 1/3</span>
-            <span class="chip" data-ex="solve(x^2-5x+6=0,x)">квадратное</span>
-            <span class="chip" data-ex="simplify((x^2-1)/(x-1))">упростить</span>
-            <span class="chip" data-ex="heron(5,5,6)">треугольник 5-5-6</span>
-            <span class="chip" data-ex="circle(5)">круг r=5</span>
+         <div class="examples">
+            <span class="chip" data-ex="sqrt(8)+1/3">√8+1/3</span>
+            <span class="chip" data-ex="x^2-5x+6=0">уравнение</span>
+            <span class="chip" data-ex="x^2+x-30<0">квадр. неравенство</span>
+            <span class="chip" data-ex="(x-1)/(x+2)>0">дробное</span>
+            <span class="chip" data-ex="abs(x-2)<3">модуль</span>
+            <span class="chip" data-ex="1<x<=5">двойное</span>
+            <span class="chip" data-ex="heron(5,5,6)">Герон</span>
+            <span class="chip" data-ex="pythag(3,4)">Пифагор</span>
+            <span class="chip" data-ex="circle(5)">круг</span>
+            <span class="chip" data-ex="sphere_v(3)">шар</span>
+            <span class="chip" data-ex="sind(30)">sin 30°</span>
+            <span class="chip" data-ex="C(10,3)">C(n,k)</span>
+            <span class="chip" data-ex="arithsum(2,3,10)">прогрессия</span>
+            <span class="chip" data-ex="pct(200,15)">15% от 200</span>
             <span class="chip" data-ex="F=m*a | m=2; a=9.8">F=ma</span>
           </div>
+          <p class="muted" style="margin:8px 0 0">
+            Неравенства: <code>x^2+x-30&lt;0</code>, <code>(x-1)/(x+2)&gt;0</code>, <code>abs(x-2)&lt;3</code>, <code>1&lt;x&lt;5</code>.
+            Команды: <code>heron</code> <code>pythag</code> <code>circle</code> <code>sphere_v</code> <code>cylinder_v(r,h)</code>
+            <code>cone_v(r,h)</code> <code>dist(x1,y1,x2,y2)</code> <code>gcd</code> <code>lcm</code> <code>fact</code>
+            <code>C(n,k)</code> <code>P(n,k)</code> <code>sind(30)</code> <code>log10</code> <code>ln</code>
+            <code>arith(a1,d,n)</code> <code>arithsum</code> <code>geom</code> <code>geomsum</code> <code>pct(x,p)</code>.
+            Сложное (триг. неравенства, параметры) — «Объяснить ИИ».
+          </p>
           <div class="row">
             <button class="btn primary" id="calcBtn">Вычислить точно</button>
             <button class="btn secondary" id="explainBtn">Объяснить ИИ</button>
