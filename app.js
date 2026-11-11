@@ -105,7 +105,7 @@ function renderTex(el, latex) {
 
 function heron(a, b, c) {
   const p = nerdamer(`(${a}+${b}+${c})/2`).text();
-  return nerdamer(`sqrt((${p})*((${p})-${a})*((${p})-${b})*((${p})-${c}))`);
+  return `sqrt((${p})*((${p})-${a})*((${p})-${b})*((${p})-${c}))`;
 }
 
 function safeToText(val) {
@@ -127,6 +127,123 @@ function safeToTeX(val) {
 function wrapResult(val, note) {
   const text = safeToText(val);
   return { exact: safeToTeX(val) || text, text, note };
+}
+
+function splitSquareFree(n) {
+  let a = 1, b = n, d = 2;
+  while (d * d <= b) {
+    while (b % (d * d) === 0) {
+      a *= d;
+      b = Math.floor(b / (d * d));
+    }
+    d = d === 2 ? 3 : d + 2;
+  }
+  return { a, b };
+}
+
+function primeFactors(n) {
+  const out = [];
+  let x = n, d = 2;
+  while (d * d <= x) {
+    while (x % d === 0) {
+      out.push(d);
+      x = Math.floor(x / d);
+    }
+    d = d === 2 ? 3 : d + 2;
+  }
+  if (x > 1) out.push(x);
+  return out;
+}
+
+function normalizeSqrtSyntax(s) {
+  return String(s)
+    .replace(/√\s*\(([^)]+)\)/g, "sqrt($1)")
+    .replace(/√\s*(\d+(?:\.\d+)?)/g, "sqrt($1)");
+}
+
+function protectNumericSqirts(expr) {
+  let s = normalizeSqrtSyntax(expr);
+  const re = /sqrt\s*\(([^()]+)\)/i;
+  let guard = 0;
+  while (re.test(s) && guard++ < 30) {
+    let changed = false;
+    s = s.replace(/sqrt\s*\(([^()]+)\)/gi, (full, inner) => {
+      if (/[a-zA-Z]/.test(inner)) return full;
+      try {
+        const rat = nerdamer(inner).text().trim();
+        const m = rat.match(/^([+-]?\d+)(?:\/(\d+))?$/);
+        if (!m) return full;
+        const p = parseInt(m[1], 10);
+        const q = m[2] ? parseInt(m[2], 10) : 1;
+        if (p < 0 || q <= 0 || p * q > 1e9) return full;
+        if (p === 0) { changed = true; return "0"; }
+        const { a, b } = splitSquareFree(p * q);
+        changed = true;
+        if (b === 1) return `(${a}/${q})`;
+        const surds = primeFactors(b).map((pr) => `SURD${pr}`).join("*");
+        return `((${a}*${surds})/${q})`;
+      } catch {
+        return full;
+      }
+    });
+    if (!changed) break;
+  }
+  return s;
+}
+
+function reduceSurdPowers(s) {
+  return s.replace(/SURD(\d+)\^(\d+)/g, (_, pStr, kStr) => {
+    const p = BigInt(pStr), k = parseInt(kStr, 10);
+    const coef = (p ** BigInt(Math.floor(k / 2))).toString();
+    return k % 2 === 1 ? `(${coef}*SURD${pStr})` : `(${coef})`;
+  });
+}
+
+function restoreSurdsText(s) {
+  let out = String(s);
+  while (/SURD(\d+)\*SURD(\d+)/.test(out)) {
+    out = out.replace(/SURD(\d+)\*SURD(\d+)/g, (_, a, b) => `SURD${Number(a) * Number(b)}`);
+  }
+  return out.replace(/SURD(\d+)/g, "sqrt($1)");
+}
+
+function restoreSurdsTeX(tex) {
+  let out = String(tex)
+    .replace(/\\(?:mathrm|text|mathit)\{SURD\}(?:_\{(\d+)\}|_(\d+))?/g, (_, a, b) => `\\sqrt{${a || b}}`)
+    .replace(/\\(?:mathrm|text|mathit)\{SURD_?\{?(\d+)\}?\}/g, "\\sqrt{$1}")
+    .replace(/SURD(?:_\{(\d+)\}|_(\d+)|(\d+))/g, (_, a, b, c) => `\\sqrt{${a || b || c}}`);
+  while (/\\sqrt\{(\d+)\}\s*\\cdot\s*\\sqrt\{(\d+)\}/.test(out)) {
+    out = out.replace(/\\sqrt\{(\d+)\}\s*\\cdot\s*\\sqrt\{(\d+)\}/g, (_, a, b) => `\\sqrt{${Number(a) * Number(b)}}`);
+  }
+  return out;
+}
+
+function evalExactSymbolic(expr, note = "Точное символьное вычисление (nerdamer)") {
+  const protectedExpr = protectNumericSqirts(expr);
+  let expanded = nerdamer(protectedExpr).expand().text();
+  if (/SURD\d+\^\d+/.test(expanded)) {
+    expanded = nerdamer(reduceSurdPowers(expanded)).expand().text();
+  }
+  const simplified = nerdamer(expanded).simplify();
+  const exactText = restoreSurdsText(safeToText(simplified));
+  const exactTex = restoreSurdsTeX(safeToTeX(simplified) || exactText);
+
+  let approxNote = "";
+  const varsOnly = exactText.replace(/\b(sqrt|sin|cos|tan|asin|acos|atan|log|ln|pi|e)\b/gi, "");
+  if (!/[a-zA-Z]/.test(varsOnly) && /sqrt|pi/i.test(exactText)) {
+    try {
+      const num = Number(nerdamer(exactText).evaluate().text());
+      if (Number.isFinite(num) && Math.abs(num - Math.round(num)) > 1e-9) {
+        approxNote = ` (≈ ${Math.round(num * 1e5) / 1e5})`;
+      }
+    } catch {}
+  }
+
+  return {
+    exact: exactTex,
+    text: exactText,
+    note: note + approxNote
+  };
 }
 
 function splitArgs(s) {
@@ -186,7 +303,7 @@ function fmtInterval(a, b, la, ra) {
 
 function extractRoots(val) {
   const t = safeToText(val);
-  if (!t || t === "[]" || /\[\]/.test(t) && t.length < 4) return [];
+  if (!t || t === "[]" || (/\[\]/.test(t) && t.length < 4)) return [];
   const parts = t.replace(/[\[\]\(\)]/g, " ").split(/[,;]+/);
   const roots = [];
   for (let p of parts) {
@@ -202,7 +319,7 @@ function extractRoots(val) {
 
 function evalAt(expr, x) {
   try {
-    const v = nerdamer(expr).sub("x", String(x)).evaluate();
+    const v = nerdamer(expr).sub("x", `(${x})`).evaluate();
     const n = Number(safeToText(v));
     if (!Number.isFinite(n)) return "u";
     if (Math.abs(n) < 1e-10) return "0";
@@ -227,11 +344,8 @@ function unwrapParens(s) {
   return s;
 }
 
-function splitFrac(expr) {
-  let s = unwrapParens(expr);
-  s = s.replace(/-\(?0\)?$/g, "");
-  s = unwrapParens(s);
-
+function splitSimpleFrac(expr) {
+  const s = unwrapParens(expr);
   let d = 0;
   for (let i = 0; i < s.length; i++) {
     if (s[i] === "(") d++;
@@ -243,8 +357,91 @@ function splitFrac(expr) {
   return { num: s, den: "1" };
 }
 
+function splitTopAddTerms(s) {
+  const terms = [];
+  let d = 0, start = 0;
+  for (let i = 0; i < s.length; i++) {
+    const ch = s[i];
+    if (ch === "(") d++;
+    else if (ch === ")") d--;
+    else if (d === 0 && (ch === "+" || ch === "-") && i > start) {
+      const prev = s[i - 1];
+      if (prev && !/[+\-*/^(]/.test(prev)) {
+        terms.push(s.slice(start, i));
+        start = i;
+      }
+    }
+  }
+  terms.push(s.slice(start));
+  return terms;
+}
+
+function splitFrac(expr) {
+  let s = unwrapParens(expr);
+  s = s.replace(/-\(?0\)?$/g, "");
+  s = unwrapParens(s);
+
+  const direct = splitSimpleFrac(s);
+  if (direct.den !== "1") return direct;
+
+  const rawTerms = splitTopAddTerms(s);
+  if (rawTerms.length <= 1) return direct;
+
+  const parsed = rawTerms.map((t) => {
+    let sign = "+";
+    let body = t;
+    if (body[0] === "+" || body[0] === "-") {
+      sign = body[0];
+      body = body.slice(1);
+    }
+    const f = splitSimpleFrac(body);
+    return { sign, num: f.num, den: f.den };
+  });
+
+  if (parsed.every((p) => p.den === "1")) {
+    return { num: s, den: "1" };
+  }
+
+  let accNum = parsed[0].sign === "-" ? `-(${parsed[0].num})` : `(${parsed[0].num})`;
+  let accDen = parsed[0].den;
+
+  for (let i = 1; i < parsed.length; i++) {
+    const { sign, num, den } = parsed[i];
+    if (accDen === "1" && den === "1") {
+      accNum = `${accNum}${sign}(${num})`;
+    } else if (accDen === den) {
+      accNum = `${accNum}${sign}(${num})`;
+    } else if (accDen === "1") {
+      accNum = `(${accNum})*(${den})${sign}(${num})`;
+      accDen = den;
+    } else if (den === "1") {
+      accNum = `${accNum}${sign}(${num})*(${accDen})`;
+    } else {
+      accNum = `(${accNum})*(${den})${sign}(${num})*(${accDen})`;
+      accDen = `(${accDen})*(${den})`;
+    }
+  }
+  return { num: accNum, den: accDen };
+}
+
 function hasX(expr) {
   return /(^|[^a-zA-Z])x([^a-zA-Z]|$)/i.test(String(expr));
+}
+
+function mergeTouchingSegs(segs) {
+  if (!segs.length) return [];
+  const out = [{ ...segs[0] }];
+  for (let i = 1; i < segs.length; i++) {
+    const prev = out[out.length - 1];
+    const cur = segs[i];
+    if (Math.abs(prev.b - cur.a) < 1e-9 && prev.ra && cur.la) {
+      prev.b = cur.b;
+      prev.ra = cur.ra;
+    } else {
+      out.push({ ...cur });
+    }
+  }
+  return out;
 }
 
 function intervalMethod(fExpr, op) {
@@ -262,12 +459,14 @@ function intervalMethod(fExpr, op) {
 
   const parts = splitFrac(fExpr);
   let num = parts.num, den = parts.den;
-  try { num = nerdamer(num).text(); } catch {}
+  try { num = nerdamer(num).expand().text(); } catch {}
   try { den = nerdamer(den).text(); } catch {}
 
   let zeros = [];
   let poles = [];
   try { zeros = extractRoots(nerdamer(`solve((${num})=0,x)`)); } catch {}
+  zeros = zeros.filter((z) => evalAt(`(${num})`, z) === "0");
+
   if (hasX(den)) {
     try { poles = extractRoots(nerdamer(`solve((${den})=0,x)`)); } catch {}
   }
@@ -311,8 +510,7 @@ function intervalMethod(fExpr, op) {
     segs.sort((p, q) => p.a - q.a || p.b - q.b);
   }
 
-  if (!segs.length) return "∅";
-  return segs.map((s) => fmtInterval(s.a, s.b, s.la, s.ra)).join(" ∪ ");
+  return formatSegs(mergeTouchingSegs(segs));
 }
 
 function parseInequality(s) {
@@ -343,19 +541,28 @@ function solveAbsIneq(s) {
   if (!Number.isFinite(c)) return null;
 
   if (op === "=") {
-    if (c < 0) return wrapResult("∅", "Модуль не бывает отрицательным");
-    if (c === 0) return wrapResult(nerdamer(`solve((${inner})=0,x)`), "|A|=0 → A=0");
+    if (c < 0) return { exact: "∅", text: "∅", note: "Модуль не бывает отрицательным" };
+    if (c === 0) {
+      const eq0 = intervalMethod(inner, "=");
+      return { exact: eq0, text: eq0, note: "|A|=0 → A=0" };
+    }
     const r = nerdamer(`solve(((${inner})^2)=(${c})^2,x)`);
     return wrapResult(r, `|A|=${c} → A=±${c}`);
   }
   if (c < 0) {
     if (op === "<" || op === "<=") return { exact: "∅", text: "∅", note: "|A| ≥ 0, не может быть < отрицательного" };
-    return { exact: "все x ∈ ℝ (кроме дыр ОДЗ)", text: "все x ∈ ℝ", note: "|A| ≥ 0 > отрицательного" };
+    return { exact: "все x ∈ ℝ", text: "все x ∈ ℝ", note: "|A| ≥ 0 > отрицательного" };
   }
   if (c === 0) {
     if (op === "<") return { exact: "∅", text: "∅", note: "|A|<0 невозможно" };
-    if (op === "<=") return wrapResult(nerdamer(`solve((${inner})=0,x)`), "|A|≤0 → A=0");
-    if (op === ">") return { exact: "все x, кроме нулей A", text: "все x, кроме A=0", note: "|A|>0" };
+    if (op === "<=") {
+      const eq0 = intervalMethod(inner, "=");
+      return { exact: eq0, text: eq0, note: "|A|≤0 → A=0" };
+    }
+    if (op === ">") {
+      const gt0 = intervalMethod(`(${inner})^2`, ">");
+      return { exact: gt0, text: `x ∈ ${gt0}`, note: "|A|>0 → A≠0" };
+    }
     return { exact: "все x ∈ ℝ", text: "все x ∈ ℝ", note: "|A|≥0 всегда" };
   }
 
@@ -369,7 +576,7 @@ function solveAbsIneq(s) {
   }
   const interval = intervalMethod(f, newOp);
   const text = `x ∈ ${interval}`;
-  return { exact: text, text, note: "Неравенство с модулем (школьное |A| ≶ c)" };
+  return { exact: interval, text, note: "Неравенство с модулем (школьное |A| ≶ c)" };
 }
 
 function parseBound(t) {
@@ -517,28 +724,27 @@ function namedSchool(s) {
   if (!call) return null;
   const a = call.args;
   const n = call.name;
-  const N = (...i) => a[i[0]];
 
   const map = {
-    heron: () => wrapResult(heron(a[0], a[1], a[2]), "Площадь треугольника (Герон)"),
-    triangle: () => wrapResult(nerdamer(`(${a[0]})*(${a[1]})/2`), "S = a·h/2"),
-    pythag: () => wrapResult(nerdamer(`sqrt((${a[0]})^2+(${a[1]})^2)`), "Гипотенуза c=√(a²+b²)"),
+    heron: () => evalExactSymbolic(heron(a[0], a[1], a[2]), "Площадь треугольника (Герон)"),
+    triangle: () => evalExactSymbolic(`(${a[0]})*(${a[1]})/2`, "S = a·h/2"),
+    pythag: () => evalExactSymbolic(`sqrt((${a[0]})^2+(${a[1]})^2)`, "Гипотенуза c=√(a²+b²)"),
     pythagoras: () => map.pythag(),
-    rect: () => wrapResult(nerdamer(`(${a[0]})*(${a[1]})`), "Площадь прямоугольника"),
-    trap: () => wrapResult(nerdamer(`((${a[0]})+(${a[1]}))*(${a[2]})/2`), "Трапеция (a+b)·h/2"),
+    rect: () => evalExactSymbolic(`(${a[0]})*(${a[1]})`, "Площадь прямоугольника"),
+    trap: () => evalExactSymbolic(`((${a[0]})+(${a[1]}))*(${a[2]})/2`, "Трапеция (a+b)·h/2"),
     trapezoid: () => map.trap(),
-    parallelogram: () => wrapResult(nerdamer(`(${a[0]})*(${a[1]})`), "Параллелограмм a·h"),
-    rhombus: () => wrapResult(nerdamer(`(${a[0]})*(${a[1]})/2`), "Ромб d1·d2/2"),
-    circle: () => wrapResult(nerdamer(`pi*(${a[0]})^2`), "Площадь круга πr²"),
-    circ_len: () => wrapResult(nerdamer(`2*pi*(${a[0]})`), "Длина окружности 2πr"),
-    sphere_v: () => wrapResult(nerdamer(`4/3*pi*(${a[0]})^3`), "Объём шара 4/3 πr³"),
-    sphere_s: () => wrapResult(nerdamer(`4*pi*(${a[0]})^2`), "Площадь сферы 4πr²"),
-    cylinder_v: () => wrapResult(nerdamer(`pi*(${a[0]})^2*(${a[1]})`), "Объём цилиндра πr²h"),
-    cylinder_s: () => wrapResult(nerdamer(`2*pi*(${a[0]})*((${a[0]})+(${a[1]}))`), "Полная поверхность цилиндра"),
-    cone_v: () => wrapResult(nerdamer(`1/3*pi*(${a[0]})^2*(${a[1]})`), "Объём конуса ⅓πr²h"),
-    dist: () => wrapResult(nerdamer(`sqrt((${a[2]}-(${a[0]}))^2+(${a[3]}-(${a[1]}))^2)`), "Расстояние на плоскости"),
+    parallelogram: () => evalExactSymbolic(`(${a[0]})*(${a[1]})`, "Параллелограмм a·h"),
+    rhombus: () => evalExactSymbolic(`(${a[0]})*(${a[1]})/2`, "Ромб d1·d2/2"),
+    circle: () => evalExactSymbolic(`pi*(${a[0]})^2`, "Площадь круга πr²"),
+    circ_len: () => evalExactSymbolic(`2*pi*(${a[0]})`, "Длина окружности 2πr"),
+    sphere_v: () => evalExactSymbolic(`4/3*pi*(${a[0]})^3`, "Объём шара 4/3 πr³"),
+    sphere_s: () => evalExactSymbolic(`4*pi*(${a[0]})^2`, "Площадь сферы 4πr²"),
+    cylinder_v: () => evalExactSymbolic(`pi*(${a[0]})^2*(${a[1]})`, "Объём цилиндра πr²h"),
+    cylinder_s: () => evalExactSymbolic(`2*pi*(${a[0]})*((${a[0]})+(${a[1]}))`, "Полная поверхность цилиндра"),
+    cone_v: () => evalExactSymbolic(`1/3*pi*(${a[0]})^2*(${a[1]})`, "Объём конуса ⅓πr²h"),
+    dist: () => evalExactSymbolic(`sqrt((${a[2]}-(${a[0]}))^2+(${a[3]}-(${a[1]}))^2)`, "Расстояние на плоскости"),
     midpoint: () => wrapResult(
-      nerdamer(`[(${a[0]})+(${a[2]}))/2, ((${a[1]})+(${a[3]}))/2]`),
+      nerdamer(`[((${a[0]})+(${a[2]}))/2, ((${a[1]})+(${a[3]}))/2]`),
       "Середина отрезка"
     ),
     gcd: () => wrapResult(nerdamer(`gcd(${a[0]},${a[1]})`), "НОД"),
@@ -551,17 +757,17 @@ function namedSchool(s) {
     tand: () => wrapResult(nerdamer(`tan((${a[0]})*pi/180)`).evaluate(), "tg градусов"),
     log10: () => wrapResult(nerdamer(`log10(${a[0]})`), "lg"),
     ln: () => wrapResult(nerdamer(`log(${a[0]})`), "ln"),
-    arith: () => wrapResult(nerdamer(`(${a[0]})+(${a[1]})*((${a[2]})-1)`), "n-й член арифм. прогрессии aₙ=a₁+d(n−1)"),
-    arithsum: () => wrapResult(nerdamer(`(${a[2]})/2*(2*(${a[0]})+(${a[2]}-1)*(${a[1]}))`), "Сумма арифм. прогрессии"),
-    geom: () => wrapResult(nerdamer(`(${a[0]})*(${a[1]})^((${a[2]})-1)`), "n-й член геом. прогрессии"),
-    geomsum: () => wrapResult(
-      nerdamer(`(${a[0]})*((${a[1]})^((${a[2]}))-1)/((${a[1]})-1)`),
+    arith: () => evalExactSymbolic(`(${a[0]})+(${a[1]})*((${a[2]})-1)`, "n-й член арифм. прогрессии aₙ=a₁+d(n−1)"),
+    arithsum: () => evalExactSymbolic(`(${a[2]})/2*(2*(${a[0]})+(${a[2]}-1)*(${a[1]}))`, "Сумма арифм. прогрессии"),
+    geom: () => evalExactSymbolic(`(${a[0]})*(${a[1]})^((${a[2]})-1)`, "n-й член геом. прогрессии"),
+    geomsum: () => evalExactSymbolic(
+      `(${a[0]})*((${a[1]})^((${a[2]}))-1)/((${a[1]})-1)`,
       "Сумма геом. прогрессии (q≠1)"
     ),
-    pct: () => wrapResult(nerdamer(`(${a[0]})*(${a[1]})/100`), "p% от числа"),
-    kin: () => wrapResult(nerdamer(`(${a[0]})*(${a[1]})^2/2`), "Кинетическая энергия mv²/2"),
-    pot: () => wrapResult(nerdamer(`(${a[0]})*9.8*(${a[1]})`), "Потенциальная энергия mgh, g=9.8"),
-    dens: () => wrapResult(nerdamer(`(${a[0]})/(${a[1]})`), "Плотность m/V")
+    pct: () => evalExactSymbolic(`(${a[0]})*(${a[1]})/100`, "p% от числа"),
+    kin: () => evalExactSymbolic(`(${a[0]})*(${a[1]})^2/2`, "Кинетическая энергия mv²/2"),
+    pot: () => evalExactSymbolic(`(${a[0]})*9.8*(${a[1]})`, "Потенциальная энергия mgh, g=9.8"),
+    dens: () => evalExactSymbolic(`(${a[0]})/(${a[1]})`, "Плотность m/V")
   };
 
   if (map[n]) {
@@ -573,7 +779,7 @@ function namedSchool(s) {
 function specialEval(raw) {
   const s0 = raw.trim();
   if (!s0) throw new Error("Введите формулу.");
-  const s = s0.replace(/≤/g, "<=").replace(/≥/g, ">=").replace(/−/g, "-");
+  const s = normalizeSqrtSyntax(s0.replace(/≤/g, "<=").replace(/≥/g, ">=").replace(/−/g, "-"));
 
   const named = namedSchool(s);
   if (named) return named;
@@ -589,11 +795,11 @@ function specialEval(raw) {
 
   const heronM = s.match(/^heron\s*\(\s*([^,]+)\s*,\s*([^,]+)\s*,\s*([^)]+)\s*\)$/i);
   if (heronM) {
-    return wrapResult(heron(heronM[1], heronM[2], heronM[3]), "Площадь треугольника по формуле Герона");
+    return evalExactSymbolic(heron(heronM[1], heronM[2], heronM[3]), "Площадь треугольника по формуле Герона");
   }
   const circ = s.match(/^circle\s*\(\s*([^)]+)\s*\)$/i);
   if (circ) {
-    return wrapResult(nerdamer(`pi*(${circ[1]})^2`), "Площадь круга πr² (символьно)");
+    return evalExactSymbolic(`pi*(${circ[1]})^2`, "Площадь круга πr² (символьно)");
   }
   const phys = s.split("|");
   if (phys.length === 2 && phys[0].includes("=")) {
@@ -605,7 +811,7 @@ function specialEval(raw) {
       e = e.sub(k, v);
     }
     const right = e.text().split("=")[1] || e.text();
-    return wrapResult(nerdamer(right), "Подстановка значений в формулу");
+    return evalExactSymbolic(right, "Подстановка значений в формулу");
   }
   if (/solve\s*\(/i.test(s) || (/=/.test(s) && /[a-zA-Z]/.test(s) && !/<=|>=/.test(s))) {
     let cmd = s;
@@ -615,7 +821,7 @@ function specialEval(raw) {
   if (/simplify\s*\(/i.test(s) || /^factor\s*\(/i.test(s) || /^expand\s*\(/i.test(s)) {
     return wrapResult(nerdamer(s), "Преобразование выражения");
   }
-  return wrapResult(nerdamer(s).expand().simplify(), "Точное символьное вычисление (nerdamer)");
+  return evalExactSymbolic(s, "Точное символьное вычисление (nerdamer)");
 }
 
 function calculate(raw) {
