@@ -207,13 +207,16 @@ function restoreSurdsText(s) {
   return out.replace(/SURD(\d+)/g, "sqrt($1)");
 }
 
-function restoreSurdsTeX(tex) {
-  let out = String(tex)
-    .replace(/\\(?:mathrm|text|mathit)\{SURD\}(?:_\{(\d+)\}|_(\d+))?/g, (_, a, b) => `\\sqrt{${a || b}}`)
-    .replace(/\\(?:mathrm|text|mathit)\{SURD_?\{?(\d+)\}?\}/g, "\\sqrt{$1}")
-    .replace(/SURD(?:_\{(\d+)\}|_(\d+)|(\d+))/g, (_, a, b, c) => `\\sqrt{${a || b || c}}`);
-  while (/\\sqrt\{(\d+)\}\s*\\cdot\s*\\sqrt\{(\d+)\}/.test(out)) {
-    out = out.replace(/\\sqrt\{(\d+)\}\s*\\cdot\s*\\sqrt\{(\d+)\}/g, (_, a, b) => `\\sqrt{${Number(a) * Number(b)}}`);
+function restoreSurdsTeX(tex, fallbackText) {
+  let out = String(tex || "");
+  if (!out || /SURD/i.test(out)) {
+    try {
+      out = nerdamer.convertToLaTeX(String(fallbackText || out));
+    } catch {
+      out = String(fallbackText || out)
+        .replace(/sqrt\s*\(([^()]+)\)/gi, "\\sqrt{$1}")
+        .replace(/\*/g, " \\cdot ");
+    }
   }
   return out;
 }
