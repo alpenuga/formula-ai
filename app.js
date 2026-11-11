@@ -229,7 +229,7 @@ function evalExactSymbolic(expr, note = "Точное символьное вы�
   }
   const simplified = nerdamer(expanded).simplify();
   const exactText = restoreSurdsText(safeToText(simplified));
-  const exactTex = restoreSurdsTeX(safeToTeX(simplified) || exactText);
+  const exactTex = restoreSurdsTeX(safeToTeX(simplified), exactText);
 
   let approxNote = "";
   const varsOnly = exactText.replace(/\b(sqrt|sin|cos|tan|asin|acos|atan|log|ln|pi|e)\b/gi, "");
