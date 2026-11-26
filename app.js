@@ -1286,8 +1286,20 @@ $("settingsModal").addEventListener("click", (e) => {
   if (e.target.id === "settingsModal") e.target.classList.remove("open");
 });
 
+if ($("file")) {
+  $("file").removeAttribute("capture");
+  $("file").setAttribute("accept", "image/*");
+}
+
 if ("serviceWorker" in navigator && location.protocol.startsWith("http")) {
-  navigator.serviceWorker.register("./sw.js").catch(() => {});
+  navigator.serviceWorker.register("./sw.js").then((reg) => reg.update()).catch(() => {});
+  let refreshing = false;
+  navigator.serviceWorker.addEventListener("controllerchange", () => {
+    if (!refreshing) {
+      refreshing = true;
+      location.reload();
+    }
+  });
 }
 
 loadSettings();
