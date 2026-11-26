@@ -1286,10 +1286,131 @@ $("settingsModal").addEventListener("click", (e) => {
   if (e.target.id === "settingsModal") e.target.classList.remove("open");
 });
 
-if ($("file")) {
-  $("file").removeAttribute("capture");
-  $("file").setAttribute("accept", "image/*");
+async function handlePickedFile(ev) {
+  const f = ev.target.files?.[0];
+  if (!f) return;
+  const img = $("preview");
+  img.src = URL.createObjectURL(f);
+  img.style.display = "block";
+  try {
+    await fileToInline(f);
+    setStatus($("photoStatus"), "Фото сжато и готово к отправке.", "ok");
+  } catch (e) {
+    setStatus($("photoStatus"), e.message, "err");
+  }
+  ev.target.value = "";
 }
+
+function setupPhotoButtons() {
+  const fileGallery = $("file");
+  if (!fileGallery || $("cameraBtn")) return;
+
+  // 1. Вход для Галереи / Файлов (без камеры)
+  fileGallery.removeAttribute("capture");
+  fileGallery.setAttribute("accept", "image/jpeg,image/png,image/webp,application/octet-stream");
+  fileGallery.style.display = "none";
+  fileGallery.onchange = handlePickedFile;
+
+  // 2. Отдельный скрытый вход для Камеры
+  const fileCamera = document.createElement("input");
+  fileCamera.type = "file";
+  fileCamera.accept = "image/*";
+  fileCamera.setAttribute("capture", "environment");
+  fileCamera.style.display = "none";
+  fileCamera.onchange = handlePickedFile;
+  fileGallery.parentNode.insertBefore(fileCamera, fileGallery);
+
+  // 3. Две кнопки рядом: Камера и Галерея
+  const wrap = document.createElement("div");
+  wrap.style.cssText = "display:flex; gap:10px; margin-bottom:10px; flex-wrap:wrap;";
+
+  const btnClass = $("readBtn")?.className || "";
+
+  const camBtn = document.createElement("button");
+  camBtn.type = "button";
+  camBtn.id = "cameraBtn";
+  camBtn.className = btnClass;
+  camBtn.textContent = "📷 Камера";
+  camBtn.onclick = () => fileCamera.click();
+
+  const galBtn = document.createElement("button");
+  galBtn.type = "button";
+  galBtn.id = "galleryBtn";
+  galBtn.className = btnClass;
+  galBtn.textContent = "📁 Галерея";
+  galBtn.onclick = () => fileGallery.click();
+
+  wrap.appendChild(camBtn);
+  wrap.appendChild(galBtn);
+  fileGallery.parentNode.insertBefore(wrap, fileGallery);
+}
+
+setupPhotoButtons();
+
+async function runPhoto(explain) {
+  try {
+    setStatus($("photoStatus"), "Gemini читает фото… модель " + getModel());
+    const { txt, json, calcLines } = await readHomework(explain);
+    renderExplain(
+      $("ocrOut"),
+      (json ? `### Предмет\n${json.subject}\n\n${json.task_text || ""}\n\n${json.notes || "—"}\n\n` : "") +
+      (calcLines.length ? ("### Локальный точный расчёт\n" + calcLines.map((x) => `* ${x}`).join("\n") + "\n\n") : "") +
+      txt
+    );
+    setStatus($("photoStatus"), "Готово · " + getModel(), "ok");
+    pushHistory({
+      type: "photo",
+      input: json?.task_text || "фото",
+      output: (calcLines[0] || "").slice(0, 200)
+    });
+  } catch (e) {
+    setStatus($("photoStatus"), e.message, "err");
+  }
+}
+
+$("readBtn").onclick = () => runPhoto(false);
+$("photoExplainBtn").onclick = () => runPhoto(true);
+
+$("molarBtn").onclick = () => {
+  try {
+    const f = $("formulaChem").value.trim();
+    const r = molarMass(f);
+    $("molarOut").textContent = r.mass + " г/моль";
+    $("molarNote").textContent = r.parts.join(" · ");
+    $("expr").value = `молярная масса ${f} = ${r.mass}`;
+    state.lastExact = String(r.mass);
+    state.lastInput = `Молярная масса ${f}`;
+    pushHistory({ type: "chem", input: f, output: r.mass + " г/моль" });
+  } catch (e) {
+    $("molarOut").textContent = "ошибка";
+    $("molarNote").textContent = e.message;
+  }
+};
+
+$("chemExplainBtn").onclick = async () => {
+  try {
+    const f = $("formulaChem").value.trim();
+    const r = molarMass(f);
+    $("molarOut").textContent = r.mass + " г/моль";
+    const t = await gemini({
+      text: `Объясни по-русски расчёт молярной массы ${f}. Локальный точный результат: ${r.mass} г/моль. Разбор: ${r.parts.join("; ")}. Markdown, формулы в $...$. Кратко напомни, что такое моль.`
+    });
+    renderExplain($("explainOut"), t);
+    document.querySelector('[data-tab="calc"]').click();
+  } catch (e) {
+    $("molarNote").textContent = e.message;
+  }
+};
+
+$("settingsBtn").onclick = () => {
+  loadSettings();
+  $("settingsModal").classList.add("open");
+};
+$("closeSettings").onclick = () => $("settingsModal").classList.remove("open");
+$("saveSettings").onclick = saveSettings;
+$("settingsModal").addEventListener("click", (e) => {
+  if (e.target.id === "settingsModal") e.target.classList.remove("open");
+});
 
 if ("serviceWorker" in navigator && location.protocol.startsWith("http")) {
   navigator.serviceWorker.register("./sw.js").then((reg) => reg.update()).catch(() => {});
